@@ -8,6 +8,11 @@ import (
 	"qmhu/multi-cluster-cr/pkg/source"
 )
 
+type ControllerConfig struct {
+	OnCreation func(mgr ctrl.Manager) interface{}
+	OnSetup    func(controller interface{}, mgr ctrl.Manager) error
+}
+
 type Manager interface {
 	ctrl.Manager
 
@@ -15,7 +20,7 @@ type Manager interface {
 
 	Recv(e <-chan source.ClusterEvent)
 
-	AddController(f func(mgr ctrl.Manager) error)
+	AddControllerSetup(c ControllerConfig)
 }
 
 func NewManager(config *rest.Config, options ctrl.Options) (Manager, error) {

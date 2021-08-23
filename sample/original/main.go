@@ -10,18 +10,16 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	// +kubebuilder:scaffold:imports
 
-	mcmanager "qmhu/multi-cluster-cr/pkg/manager"
-	mcsource "qmhu/multi-cluster-cr/pkg/source"
 )
 
 var (
@@ -52,8 +50,7 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	clusterSetClusterSource := mcsource.NewClusterSetClusterSource(ctrl.GetConfigOrDie(), "default", "clusterset-dev")
-	mgr, err := mcmanager.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
 		Port:                   9443,
@@ -65,9 +62,6 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
-
-	mgr.Recv(clusterSetClusterSource.Events())
-
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -79,25 +73,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	mgr.AddControllerSetup(mcmanager.ControllerConfig{
-		OnCreation: func(mgr ctrl.Manager) interface{} {
-			return &PodReconciler{
-				Client: mgr.GetClient(),
-				Log:    mgr.GetLogger(),
-				Scheme: mgr.GetScheme(),
-			}
-		},
-		OnSetup: func(controller interface{}, mgr ctrl.Manager) error {
-			return (controller.(*PodReconciler)).SetupWithManager(mgr)
-		},
-	})
+	podReconciler := PodReconciler{
+		Client: mgr.GetClient(),
+		Log:    mgr.GetLogger(),
+		Scheme: mgr.GetScheme(),
+	}
+
+	if err := podReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "problem setup with manager")
+		os.Exit(1)
+	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
-
 }
 
 // PodReconciler reconciles a Pod object

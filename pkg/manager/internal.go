@@ -1,5 +1,5 @@
 package manager
-
+/*
 import (
 	"qmhu/multi-cluster-cr/pkg/source"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
@@ -24,3 +24,4 @@ func (m *multiClusterManager) Recv(e <-chan source.ClusterEvent) {
 func (m *multiClusterManager) Add(r manager.Runnable) error {
 
 }
+*/
