@@ -2,10 +2,9 @@ package manager
 
 import (
 	"k8s.io/client-go/rest"
+	"qmhu/multi-cluster-cr/pkg/source"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
-
-	"qmhu/multi-cluster-cr/pkg/source"
 )
 
 type ControllerConfig struct {
@@ -18,7 +17,7 @@ type Manager interface {
 
 	GetCluster(clusterName string) cluster.Cluster
 
-	Recv(e <-chan source.ClusterEvent)
+	EventChannel() chan source.ClusterEvent
 
 	AddControllerSetup(c ControllerConfig)
 }

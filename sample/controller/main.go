@@ -52,7 +52,12 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	clusterSetClusterSource := mcsource.NewClusterSetClusterSource(ctrl.GetConfigOrDie(), "default", "clusterset-dev")
+	clusterSetClusterSource, err := mcsource.NewClusterSetClusterSource(ctrl.GetConfigOrDie(), "default", "clusterset-dev")
+	if err != nil {
+		setupLog.Error(err, "unable to new source")
+		os.Exit(1)
+	}
+
 	mgr, err := mcmanager.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
@@ -66,8 +71,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	mgr.Recv(clusterSetClusterSource.Events())
-
+	clusterSetClusterSource.Register(mgr.EventChannel())
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

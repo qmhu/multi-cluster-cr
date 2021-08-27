@@ -1,4 +1,4 @@
-apiVersion: clusters.clusternet.io/v1alpha1
+apiVersion: controllerruntime.clusternet.io/v1alpha1
 kind: ClusterSet
 metadata:
   name: clusterset-dev
@@ -8,4 +8,3 @@ spec:
     - matchLabels:
         clusters.clusternet.io/cluster-id: dc91021d-2361-4f6d-a404-7c33b9e01118
       provider: clusternet
-
