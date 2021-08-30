@@ -18,7 +18,6 @@ import (
 
 	controllerruntimeapi "qmhu/multi-cluster-cr/pkg/apis/controllerruntime/v1alpha1"
 	controllerruntimeClientset "qmhu/multi-cluster-cr/pkg/generated/clientset/versioned"
-	clusterprovider "qmhu/multi-cluster-cr/pkg/source/provider"
 )
 
 var (
@@ -135,7 +134,7 @@ func (s *ClusterSetClusterSource) onChange(cs *controllerruntimeapi.ClusterSet) 
 		provider := s.getClusterProvider(clusterAffinity.Provider)
 		if provider == nil {
 			// lazy initialization
-			provider, err := clusterprovider.NewClusternetProvider(s.config)
+			provider, err := NewClusternetProvider(s.config)
 			if err != nil {
 				s.logger.Error(err, fmt.Sprintf("parse object meta failed"))
 				continue
@@ -147,7 +146,7 @@ func (s *ClusterSetClusterSource) onChange(cs *controllerruntimeapi.ClusterSet) 
 		// list clusters from provider
 		clusters, err := provider.ListClusters(clusterAffinity)
 		if err != nil {
-			s.logger.Error(err, fmt.Sprintf("%s list cluster failed", provider.ProviderType()))
+			s.logger.Error(err, fmt.Sprintf("%s list Cluster failed", provider.ProviderType()))
 			return
 		}
 
@@ -164,8 +163,8 @@ func (s *ClusterSetClusterSource) onChange(cs *controllerruntimeapi.ClusterSet) 
 	for _, cluster := range allClusters {
 		if _, exist := s.clustersMap[cluster]; !exist {
 			s.Notify(ClusterEvent{
-				eventType: ClusterEventAdd,
-				cluster:   cluster,
+				EventType: ClusterEventAdd,
+				Cluster:   cluster,
 			})
 		}
 
@@ -175,8 +174,8 @@ func (s *ClusterSetClusterSource) onChange(cs *controllerruntimeapi.ClusterSet) 
 
 	for toDelete, _ := range toDeleteClusterMap {
 		s.Notify(ClusterEvent{
-			eventType: ClusterEventRemove,
-			cluster:   toDelete,
+			EventType: ClusterEventRemove,
+			Cluster:   toDelete,
 		})
 	}
 

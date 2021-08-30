@@ -3,6 +3,8 @@ package source
 import (
 	"context"
 	"fmt"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"os"
 
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -10,7 +12,7 @@ import (
 func NewBasicClusterSource(clusters []Cluster) ClusterSource {
 	return &BasicClusterSource{
 		clusters: clusters,
-		channels: make([]chan ClusterEvent, 1),
+		channels: []chan ClusterEvent{},
 	}
 }
 
@@ -24,8 +26,8 @@ func (s *BasicClusterSource) Start(ctx context.Context) error {
 		for _, channel := range s.channels {
 			for _, cluster := range s.clusters {
 				addEvent := ClusterEvent{
-					cluster:   cluster,
-					eventType: ClusterEventAdd,
+					Cluster:   cluster,
+					EventType: ClusterEventAdd,
 				}
 
 				channel <- addEvent
@@ -44,30 +46,31 @@ func (s *BasicClusterSource) Register(eventChan chan ClusterEvent) {
 	s.channels = append(s.channels, eventChan)
 }
 
-func GenerateClustersFromConfig(kubeConfig string) ([]Cluster, error) {
+func GetClustersFromConfigFile(kubeConfigFile string) ([]Cluster, error) {
 	var clusters []Cluster
-	apiConfig, err := clientcmd.Load([]byte(kubeConfig))
-	if err != nil {
-		return nil, fmt.Errorf("unable to get api config %v: %v", kubeConfig, err)
+	apiConfig, err := clientcmd.LoadFromFile(kubeConfigFile)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("unable to get config from path %v: %v", kubeConfigFile, err)
 	}
 
-	for _, context := range apiConfig.Contexts {
+	if apiConfig == nil {
+		apiConfig = clientcmdapi.NewConfig()
+	}
+
+	for context, _ := range apiConfig.Contexts {
+		clusterApiConfig := apiConfig.DeepCopy()
+		clusterApiConfig.CurrentContext = context
+
+		apiConfigBytes, err := clientcmd.Write(*clusterApiConfig)
+		if err != nil {
+			return nil, fmt.Errorf("unable to marshal api config: %v", err)
+		}
+
 		cluster := Cluster{
-			Name: context.Cluster,
+			Name: context,
+			KubeConfig: string(apiConfigBytes),
 		}
-		if context.Cluster != apiConfig.CurrentContext {
-			clusterApiConfig := apiConfig.DeepCopy()
-			clusterApiConfig.CurrentContext = context.Cluster
 
-			apiConfigBytes, err := clientcmd.Write(*clusterApiConfig)
-			if err != nil {
-				return nil, fmt.Errorf("unable to marshal api config: %v", err)
-			}
-
-			cluster.KubeConfig = string(apiConfigBytes)
-		} else {
-			cluster.KubeConfig = kubeConfig
-		}
 		clusters = append(clusters, cluster)
 	}
 

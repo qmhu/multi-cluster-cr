@@ -1,28 +1,27 @@
-package provider
+package source
 
 import (
 	"context"
 	"fmt"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	clusternetClientset "github.com/clusternet/clusternet/pkg/generated/clientset/versioned"
 	controllerruntimeapi "qmhu/multi-cluster-cr/pkg/apis/controllerruntime/v1alpha1"
-	"qmhu/multi-cluster-cr/pkg/source"
 )
 
 const (
-	ChildClusterSecretName      = "child-cluster-deployer"
+	ChildClusterSecretName      = "child-Cluster-deployer"
 	ChildClusterAPIServerURLKey = "apiserver-advertise-url"
 )
 
-func NewClusternetProvider(config *rest.Config) (source.ClusterProvider, error) {
+func NewClusternetProvider(config *rest.Config) (ClusterProvider, error) {
 	kubeclient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init kubernetes client: %v", err)
@@ -45,7 +44,7 @@ type ClusternetProvider struct {
 	kubeclient       *kubernetes.Clientset
 }
 
-func (p *ClusternetProvider) ListClusters(clusterAffinity controllerruntimeapi.ClusterAffinity) ([]source.Cluster, error) {
+func (p *ClusternetProvider) ListClusters(clusterAffinity controllerruntimeapi.ClusterAffinity) ([]Cluster, error) {
 	if clusterAffinity.Provider != p.ProviderType() {
 		return nil, fmt.Errorf("unexpected provider type %s", clusterAffinity.Provider)
 	}
@@ -55,7 +54,7 @@ func (p *ClusternetProvider) ListClusters(clusterAffinity controllerruntimeapi.C
 		return nil, err
 	}
 
-	var clusters []source.Cluster
+	var clusters []Cluster
 	for _, clusternetCluster := range clusterList.Items {
 		childClusterSecret, err := p.kubeclient.CoreV1().Secrets(clusternetCluster.Namespace).Get(context.TODO(), ChildClusterSecretName, metav1.GetOptions{})
 		if err != nil {
@@ -74,7 +73,7 @@ func (p *ClusternetProvider) ListClusters(clusterAffinity controllerruntimeapi.C
 			return nil, fmt.Errorf("unable to marshal api config: %v", err)
 		}
 
-		cluster := source.Cluster{
+		cluster := Cluster{
 			Name:       clusternetCluster.Name,
 			KubeConfig: string(kubeconfigBytes),
 		}
@@ -90,7 +89,7 @@ func (p *ClusternetProvider) ProviderType() controllerruntimeapi.Provider {
 
 // createBasicKubeConfig creates a basic, general KubeConfig object that then can be extended
 func createBasicKubeConfig(serverURL, clusterName, userName string, caCert []byte) *clientcmdapi.Config {
-	// Use the cluster and the username as the context name
+	// Use the Cluster and the username as the context name
 	contextName := fmt.Sprintf("%s@%s", userName, clusterName)
 
 	var insecureSkipTLSVerify bool

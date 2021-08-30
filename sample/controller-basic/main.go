@@ -52,11 +52,12 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	clusterSetClusterSource, err := mcsource.NewClusterSetClusterSource(ctrl.GetConfigOrDie(), "default", "clusterset-dev")
+	clusters, err := mcsource.GetClustersFromConfigFile("/Users/hu/.kube/config")
 	if err != nil {
-		setupLog.Error(err, "unable to new source")
+		setupLog.Error(err, "unable to get clusters")
 		os.Exit(1)
 	}
+	clusterSource := mcsource.NewBasicClusterSource(clusters)
 
 	mgr, err := mcmanager.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
@@ -71,7 +72,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	clusterSetClusterSource.Register(mgr.EventChannel())
+	clusterSource.Register(mgr.EventChannel())
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -83,21 +84,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	mgr.AddControllerSetup(mcmanager.ControllerConfig{
-		OnCreation: func(mgr ctrl.Manager) interface{} {
-			return &PodReconciler{
-				Client: mgr.GetClient(),
-				Log:    mgr.GetLogger(),
-				Scheme: mgr.GetScheme(),
-			}
-		},
-		OnSetup: func(controller interface{}, mgr ctrl.Manager) error {
-			return (controller.(*PodReconciler)).SetupWithManager(mgr)
-		},
-	})
+	setupLog.Info("starting source and manager")
+	ctx := ctrl.SetupSignalHandler()
+	go clusterSource.Start(ctx)
 
-	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
