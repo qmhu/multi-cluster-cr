@@ -9,6 +9,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	"net/http"
+	clusterManager "qmhu/multi-cluster-cr/pkg/cluster"
+	controllerManager "qmhu/multi-cluster-cr/pkg/controller"
+
 	"qmhu/multi-cluster-cr/pkg/source"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -43,7 +46,9 @@ func NewManager(config *rest.Config, options ctrl.Options) (Manager, error) {
 }
 
 type multiClusterManager struct {
-	eventChannel chan source.ClusterEvent
+	eventChannel      chan source.ClusterEvent
+	clusterManager    clusterManager.Manager
+	controllerManager controllerManager.Manager
 }
 
 func (m *multiClusterManager) EventChannel() chan source.ClusterEvent {
@@ -87,6 +92,10 @@ func (m *multiClusterManager) Start(ctx context.Context) error {
 			select {
 			case e := <-m.eventChannel:
 				managerLog.Info(fmt.Sprintf("EventType %s Cluster(%s %s)", e.EventType, e.Cluster.Namespace, e.Cluster.Name))
+
+				// update ClusterManager
+
+				// update ControllerManager
 			}
 		}
 	}()
