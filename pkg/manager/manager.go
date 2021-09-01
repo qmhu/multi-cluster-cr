@@ -3,16 +3,18 @@ package manager
 import (
 	"context"
 	"fmt"
+	"net/http"
+	clusterManager "qmhu/multi-cluster-cr/pkg/cluster"
+	controllerManager "qmhu/multi-cluster-cr/pkg/controller"
+
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
-	"net/http"
-	clusterManager "qmhu/multi-cluster-cr/pkg/cluster"
-	controllerManager "qmhu/multi-cluster-cr/pkg/controller"
 
 	"qmhu/multi-cluster-cr/pkg/source"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,6 +39,8 @@ type Manager interface {
 	EventChannel() chan source.ClusterEvent
 
 	GetClusterClient() client.Client
+	GetClusterMap() *clusterManager.MultiClusterMap
+	GetAdminClusterName() string
 }
 
 func NewManager(config *rest.Config, options ctrl.Options) (Manager, error) {
@@ -47,8 +51,16 @@ func NewManager(config *rest.Config, options ctrl.Options) (Manager, error) {
 
 type multiClusterManager struct {
 	eventChannel      chan source.ClusterEvent
-	clusterManager    clusterManager.Manager
+	clusterMap        clusterManager.MultiClusterMap
 	controllerManager controllerManager.Manager
+}
+
+func (m *multiClusterManager) GetAdminClusterName() string {
+	panic("implement me")
+}
+
+func (m *multiClusterManager) GetClusterMap() *clusterManager.MultiClusterMap {
+	return &m.clusterMap
 }
 
 func (m *multiClusterManager) EventChannel() chan source.ClusterEvent {

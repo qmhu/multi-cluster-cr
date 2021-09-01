@@ -2,21 +2,22 @@ package cluster
 
 import (
 	"qmhu/multi-cluster-cr/pkg/source"
+
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 )
 
-type Manager struct {
+type MultiClusterMap struct {
 	clusterMap map[string]cluster.Cluster
 }
 
-func (*Manager) GetCluster(name string) cluster.Cluster {
+func (*MultiClusterMap) GetCluster(name string) (cluster.Cluster, error) {
+	return nil, nil
+}
+
+func (*MultiClusterMap) AddCluster(cluster source.Cluster) error {
 	return nil
 }
 
-func (*Manager) AddCluster(cluster source.Cluster) error {
-	return nil
-}
-
-func (*Manager) DeleteCluster(cluster source.Cluster) error {
+func (*MultiClusterMap) DeleteCluster(cluster source.Cluster) error {
 	return nil
 }
