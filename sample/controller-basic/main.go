@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"flag"
-	"os"
-
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"os"
+	"qmhu/multi-cluster-cr/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -84,6 +84,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	podReconciler := PodReconciler{
+		Client: mgr.GetClient(),
+		Log:    mgr.GetLogger(),
+		Scheme: mgr.GetScheme(),
+	}
+
+	if err := podReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "problem setup with manager")
+		os.Exit(1)
+	}
+
 	setupLog.Info("starting source and manager")
 	ctx := ctrl.SetupSignalHandler()
 	go clusterSource.Start(ctx)
@@ -110,8 +121,8 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	return ctrl.Result{}, nil
 }
 
-func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+func (r *PodReconciler) SetupWithManager(mgr mcmanager.Manager) error {
+	return builder.NewControllerManagedBy(mgr).
 		For(&v1.Pod{}).
 		Complete(r)
 }

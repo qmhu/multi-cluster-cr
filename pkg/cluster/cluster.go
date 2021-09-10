@@ -2,22 +2,33 @@ package cluster
 
 import (
 	"qmhu/multi-cluster-cr/pkg/source"
+	"sync"
 
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 )
 
 type MultiClusterMap struct {
+	sync.Mutex
 	clusterMap map[string]cluster.Cluster
 }
 
-func (*MultiClusterMap) GetCluster(name string) (cluster.Cluster, error) {
-	return nil, nil
+func NewMultiClusterMap() MultiClusterMap {
+	return MultiClusterMap{
+		clusterMap: make(map[string]cluster.Cluster),
+	}
 }
 
-func (*MultiClusterMap) AddCluster(cluster source.Cluster) error {
-	return nil
+func (c *MultiClusterMap) GetCluster(name string) cluster.Cluster{
+	return c.clusterMap[name]
 }
 
-func (*MultiClusterMap) DeleteCluster(cluster source.Cluster) error {
+func (c *MultiClusterMap) AddCluster(name string, cluster cluster.Cluster) {
+	c.Lock()
+	defer c.Unlock()
+
+	c.clusterMap[name] = cluster
+}
+
+func (c *MultiClusterMap) DeleteCluster(cluster source.Cluster) error {
 	return nil
 }

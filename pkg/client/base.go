@@ -22,16 +22,16 @@ type MultiClusterClientBaseImpl struct {
 }
 
 func (base *MultiClusterClientBaseImpl) Scheme() *runtime.Scheme {
-	cluster, err := base.mcMap.GetCluster(base.defaultClusterName)
-	if err != nil {
+	cluster := base.mcMap.GetCluster(base.defaultClusterName)
+	if cluster == nil {
 		return nil
 	}
 	return cluster.GetScheme()
 }
 
 func (base *MultiClusterClientBaseImpl) RESTMapper() meta.RESTMapper {
-	cluster, err := base.mcMap.GetCluster(base.defaultClusterName)
-	if err != nil {
+	cluster := base.mcMap.GetCluster(base.defaultClusterName)
+	if cluster == nil {
 		return nil
 	}
 	return cluster.GetRESTMapper()
@@ -43,8 +43,8 @@ func (base *MultiClusterClientBaseImpl) getRealClient(ctx context.Context) (clie
 		return nil, err
 	}
 
-	cluster, err := base.mcMap.GetCluster(clusterName)
-	if err != nil {
+	cluster := base.mcMap.GetCluster(clusterName)
+	if cluster == nil {
 		return nil, fmt.Errorf(ErrClusterNotFoundInClientMap, cluster)
 	}
 
