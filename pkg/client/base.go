@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	multicluster "qmhu/multi-cluster-cr/pkg/cluster"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -13,28 +12,33 @@ import (
 type MultiClusterClientBase interface {
 	getRealClient(ctx context.Context) (client.Client, error)
 	Scheme() *runtime.Scheme
+	SetScheme(scheme *runtime.Scheme)
 	RESTMapper() meta.RESTMapper
+	SetRESTMapper(restMapper meta.RESTMapper)
+	Add(clusterName string, client client.Client)
+	Del(clusterName string)
 }
 
 type MultiClusterClientBaseImpl struct {
-	mcMap              *multicluster.MultiClusterMap
-	defaultClusterName string
+	mcMap      map[string]client.Client
+	scheme     *runtime.Scheme
+	restMapper meta.RESTMapper
 }
 
 func (base *MultiClusterClientBaseImpl) Scheme() *runtime.Scheme {
-	cluster := base.mcMap.GetCluster(base.defaultClusterName)
-	if cluster == nil {
-		return nil
-	}
-	return cluster.GetScheme()
+	return base.scheme
+}
+
+func (base *MultiClusterClientBaseImpl) SetScheme(scheme *runtime.Scheme) {
+	base.scheme = scheme
 }
 
 func (base *MultiClusterClientBaseImpl) RESTMapper() meta.RESTMapper {
-	cluster := base.mcMap.GetCluster(base.defaultClusterName)
-	if cluster == nil {
-		return nil
-	}
-	return cluster.GetRESTMapper()
+	return base.restMapper
+}
+
+func (base *MultiClusterClientBaseImpl) SetRESTMapper(restMapper meta.RESTMapper) {
+	base.restMapper = restMapper
 }
 
 func (base *MultiClusterClientBaseImpl) getRealClient(ctx context.Context) (client.Client, error) {
@@ -43,10 +47,18 @@ func (base *MultiClusterClientBaseImpl) getRealClient(ctx context.Context) (clie
 		return nil, err
 	}
 
-	cluster := base.mcMap.GetCluster(clusterName)
-	if cluster == nil {
-		return nil, fmt.Errorf(ErrClusterNotFoundInClientMap, cluster)
+	client := base.mcMap[clusterName]
+	if client == nil {
+		return nil, fmt.Errorf(ErrClusterNotFoundInClientMap, clusterName)
 	}
 
-	return cluster.GetClient(), nil
+	return client, nil
+}
+
+func (base *MultiClusterClientBaseImpl) Add(clusterName string, client client.Client) {
+	base.mcMap[clusterName] = client
+}
+
+func (base *MultiClusterClientBaseImpl) Del(clusterName string) {
+	delete(base.mcMap, clusterName)
 }
