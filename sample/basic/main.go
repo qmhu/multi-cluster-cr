@@ -16,10 +16,12 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	// +kubebuilder:scaffold:imports
 
+	"qmhu/multi-cluster-cr/pkg/config"
+	"qmhu/multi-cluster-cr/pkg/known"
+	"qmhu/multi-cluster-cr/pkg/server"
 )
 
 var (
@@ -50,7 +52,16 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	// load all kubeconfigs with cluster name from a kubeconfig
+	configs, err := config.LoadConfigsFromConfigFile("/Users/hu/.kube/config")
+	if err != nil {
+		setupLog.Error(err, "failed to load configs from file.")
+		return
+	}
+
+	// create multi cluster controller server just like controller-runtime Manager
+	// server use config to do leaderElection and use options to builder controller-runtime Manager inside
+	multiControllerServer, err := server.NewServer(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
 		Port:                   9443,
@@ -59,34 +70,31 @@ func main() {
 		LeaderElectionID:       "80807133.tutorial.kubebuilder.io",
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "unable to new server")
 		os.Exit(1)
 	}
-	// +kubebuilder:scaffold:builder
 
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
-		os.Exit(1)
-	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
-		os.Exit(1)
+	for _, config := range configs {
+		err := multiControllerServer.Add(config)
+		if err != nil {
+			setupLog.Error(err, "unable to add a config to server")
+			os.Exit(1)
+		}
 	}
 
 	podReconciler := PodReconciler{
-		Client: mgr.GetClient(),
-		Log:    mgr.GetLogger(),
-		Scheme: mgr.GetScheme(),
+		Client: multiControllerServer.GetClient(),
+		Log:    multiControllerServer.GetLogger(),
+		Scheme: multiControllerServer.GetSchema(),
 	}
 
-	if err := podReconciler.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "problem setup with manager")
-		os.Exit(1)
-	}
+	// add reconciler setup function
+	multiControllerServer.AddReconcilerSetup(podReconciler.SetupWithManager)
 
-	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
+	setupLog.Info("starting server")
+	// start server - it'll start controller based on registered clusters
+	if err := multiControllerServer.Start(ctrl.SetupSignalHandler()); err != nil {
+		setupLog.Error(err, "problem running server")
 		os.Exit(1)
 	}
 }
@@ -99,7 +107,12 @@ type PodReconciler struct {
 }
 
 func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	r.Log.Info("got", "pod", req.NamespacedName)
+	setupLog.Info("got", "cluster", ctx.Value(known.ClusterContext), "pod", req.NamespacedName)
+
+	// The client use context to decide which cluster to interactive with,
+	// You can use the client directly just like single cluster client.
+	var pod v1.Pod
+	r.Client.Get(ctx, req.NamespacedName, &pod)
 
 	// your logic here
 
