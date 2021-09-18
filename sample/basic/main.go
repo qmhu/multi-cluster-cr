@@ -1,22 +1,3 @@
-# Kubernetes Multi-cluster controller-runtime
-
-kubernetes Multi-cluster controller-runtime is a go package for building Multi-cluster Controllers. 
-
-# Features
-* [x] Support watch multi kubernetes clusters at the same time
-* [x] Dynamic `Add` and `Delete` clusters when controller is running
-* [x] Easy to migrate single cluster controller to Multi-cluster controller
-* [x] Multi-cluster clients
-* [x] out-of-box ConfigWatcher to interactive with other Multi-cluster frameworks like `Clusternet`
-
-## Installation
-```shell
-go get -u qmhu/multi-cluster-cr
-```
-
-# Example
-
-```go
 package main
 
 import (
@@ -143,4 +124,3 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1.Pod{}).
 		Complete(r)
 }
-```

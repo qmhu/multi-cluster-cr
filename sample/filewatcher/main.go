@@ -1,34 +1,14 @@
-# Kubernetes Multi-cluster controller-runtime
-
-kubernetes Multi-cluster controller-runtime is a go package for building Multi-cluster Controllers. 
-
-# Features
-* [x] Support watch multi kubernetes clusters at the same time
-* [x] Dynamic `Add` and `Delete` clusters when controller is running
-* [x] Easy to migrate single cluster controller to Multi-cluster controller
-* [x] Multi-cluster clients
-* [x] out-of-box ConfigWatcher to interactive with other Multi-cluster frameworks like `Clusternet`
-
-## Installation
-```shell
-go get -u qmhu/multi-cluster-cr
-```
-
-# Example
-
-```go
 package main
 
 import (
 	"context"
 	"flag"
-	"os"
-
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"os"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -38,7 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	// +kubebuilder:scaffold:imports
 
-	"qmhu/multi-cluster-cr/pkg/config"
+	"qmhu/multi-cluster-cr/pkg/configwatcher"
 	"qmhu/multi-cluster-cr/pkg/known"
 	"qmhu/multi-cluster-cr/pkg/server"
 )
@@ -71,10 +51,11 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// load all kubeconfigs with cluster name from a kubeconfig
-	configs, err := config.LoadConfigsFromConfigFile("/Users/hu/.kube/config")
+	// filewatcher will watch a filepath and delivery kubeconfig events from it.
+	// filepath can be a single kubeconfig file or a directory that contains many kubeconfigs.
+	filewatcher, err := configwatcher.NewFileWatcher("/Users/hu/.kube/kubeconfig")
 	if err != nil {
-		setupLog.Error(err, "failed to load configs from file.")
+		setupLog.Error(err, "new file watcher failed")
 		return
 	}
 
@@ -93,14 +74,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	for _, config := range configs {
-		err := multiControllerServer.Add(config)
-		if err != nil {
-			setupLog.Error(err, "unable to add a config to server")
-			os.Exit(1)
-		}
-	}
-
 	podReconciler := PodReconciler{
 		Client: multiControllerServer.GetClient(),
 		Log:    multiControllerServer.GetLogger(),
@@ -109,6 +82,36 @@ func main() {
 
 	// add reconciler setup function
 	multiControllerServer.AddReconcilerSetup(podReconciler.SetupWithManager)
+
+	serviceReconciler := ServiceReconciler{
+		Client: multiControllerServer.GetClient(),
+		Log:    multiControllerServer.GetLogger(),
+		Scheme: multiControllerServer.GetSchema(),
+	}
+
+	// add reconciler setup function
+	multiControllerServer.AddReconcilerSetup(serviceReconciler.SetupWithManager)
+
+	go func() {
+		// close filewatcher and release resources
+		defer filewatcher.Stop()
+
+		for {
+			select {
+			case event := <-filewatcher.Events():
+				if event.Type == configwatcher.Added {
+					// add the config to server and start a controller to list&watch the k8s cluster if server started
+					multiControllerServer.Add(event.Config)
+				}
+				if event.Type == configwatcher.Deleted {
+					// delete the config to server and stop to list&watch the k8s cluster if controller exist
+					multiControllerServer.Delete(event.Config.Name)
+				}
+			case err := <-filewatcher.Errors():
+				setupLog.Error(err, "receive error from filewatcher")
+			}
+		}
+	}()
 
 	setupLog.Info("starting server")
 	// start server - it'll start controller based on registered clusters
@@ -143,4 +146,29 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1.Pod{}).
 		Complete(r)
 }
-```
+
+// Service reconciles a Service object
+type ServiceReconciler struct {
+	client.Client
+	Log    logr.Logger
+	Scheme *runtime.Scheme
+}
+
+func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	setupLog.Info("got", "cluster", ctx.Value(known.ClusterContext), "service", req.NamespacedName)
+
+	// The client use context to decide which cluster to interactive with,
+	// You can use the client directly just like single cluster client.
+	var service v1.Service
+	r.Client.Get(ctx, req.NamespacedName, &service)
+
+	// your logic here
+
+	return ctrl.Result{}, nil
+}
+
+func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&v1.Service{}).
+		Complete(r)
+}

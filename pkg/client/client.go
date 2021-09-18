@@ -3,8 +3,6 @@ package client
 import (
 	"context"
 
-	multimanager "qmhu/multi-cluster-cr/pkg/manager"
-
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -35,10 +33,9 @@ type MultiClusterClient struct {
 	statusWriter client.StatusWriter
 }
 
-func NewMultiClusterClientFromManager(mgr multimanager.Manager) client.Client {
+func NewMultiClusterClient() *MultiClusterClient {
 	base := &MultiClusterClientBaseImpl{
-		mcMap:              mgr.GetClusterMap(),
-		defaultClusterName: mgr.GetAdminClusterName(),
+		mcMap: make(map[string]client.Client),
 	}
 
 	mcc := &MultiClusterClient{
