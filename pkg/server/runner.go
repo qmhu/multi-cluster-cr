@@ -10,35 +10,52 @@ import (
 	"qmhu/multi-cluster-cr/pkg/known"
 )
 
+// managerRunner runs a controller-runtime manager
 type managerRunner struct {
-	manager      ctrl.Manager
-	config       *config.NamedConfig
-	cancel       context.CancelFunc
-	stopComplete chan struct{}
-	mu           sync.Mutex
+	manager   ctrl.Manager
+	config    *config.NamedConfig
+	closeChan chan struct{}
+	closed    chan struct{}
+	mu        sync.Mutex
 }
 
 func (r *managerRunner) Start(ctx context.Context) error {
 	r.mu.Lock()
 	runnerCtx, cancel := context.WithCancel(ctx)
-	r.cancel = cancel
-	r.stopComplete = make(chan struct{})
+	r.closeChan = make(chan struct{})
+	r.closed = make(chan struct{})
 	r.mu.Unlock()
 
+	// inject cluster name to manager's context
 	managerCtx := context.WithValue(runnerCtx, known.ClusterContext, r.config.Name)
 
-	return r.manager.Start(managerCtx)
-}
+	errChan := make(chan error)
+	go func() {
+		if err := r.manager.Start(managerCtx); err != nil {
+			errChan <- err
+		}
 
-func (r *managerRunner) Stop() {
-	r.cancel()
+		close(r.closed)
+	}()
 
 	select {
-	case <-r.stopComplete:
-		return
+	case err := <-errChan:
+		return err
+	case <-r.closeChan:
+		// call cancel to stop manager
+		cancel()
+
+		// wait until manager closed
+		<-r.closed
+		return nil
 	}
 }
 
-func (r *managerRunner) Done() {
-	close(r.stopComplete)
+func (r *managerRunner) Stop() {
+	// tell Start() to cancel manager
+	close(r.closeChan)
+
+	// wait until manager closed
+	<-r.closed
 }
+
