@@ -37,10 +37,10 @@ func NewFileWatcher(fileOrDir string) (*FileWatcher, error) {
 		eventChan: make(chan Event),
 		errorChan: make(chan error),
 		closeChan: make(chan struct{}),
-		configMap: make(map[string][]*config.NamedConfig),   // full-filename->kubeconfig list
+		configMap: make(map[string][]*config.NamedConfig), // full-filename->kubeconfig list
 	}
 
-	go fileWatcher.watch()
+	go fileWatcher.watch(fileOrDir)
 
 	return fileWatcher, nil
 }
@@ -65,7 +65,7 @@ func (w *FileWatcher) Stop() {
 	w.closeChan <- struct{}{}
 }
 
-func (w *FileWatcher) watch() {
+func (w *FileWatcher) watch(fileOrDir string) {
 	defer close(w.eventChan)
 	defer close(w.errorChan)
 	defer w.Stop()
@@ -115,13 +115,14 @@ func (w *FileWatcher) watch() {
 	}()
 
 	// start internal watcher here
+	w.logger.Info("start watching", "filepath", fileOrDir)
 	if err := w.watcher.Start(time.Millisecond * 100); err != nil {
 		w.errorChan <- err
 	}
 }
 
 func (w *FileWatcher) onFileUpdate(name string) {
-	configs, err := config.GetConfigsFromConfigFile(name)
+	configs, err := config.LoadConfigsFromConfigFile(name)
 	if err != nil {
 		w.errorChan <- err
 		return

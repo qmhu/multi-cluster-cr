@@ -41,7 +41,7 @@ func main() {
 	var probeAddr string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
+	flag.BoolVar(&enableLeaderElection, "leader-elect", true,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	opts := zap.Options{
@@ -61,13 +61,14 @@ func main() {
 
 	// create multi cluster controller server just like controller-runtime Manager
 	// server use config to do leaderElection and use options to builder controller-runtime Manager inside
-	multiControllerServer, err := server.NewServer(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "80807133.tutorial.kubebuilder.io",
+	multiClusterServer, err := server.NewServer(ctrl.GetConfigOrDie(), ctrl.Options{
+		Scheme:                  scheme,
+		MetricsBindAddress:      metricsAddr,
+		Port:                    9443,
+		HealthProbeBindAddress:  probeAddr,
+		LeaderElection:          enableLeaderElection,
+		LeaderElectionID:        "80807133.tutorial.kubebuilder.io",
+		LeaderElectionNamespace: "default",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to new server")
@@ -75,7 +76,7 @@ func main() {
 	}
 
 	for _, config := range configs {
-		err := multiControllerServer.Add(config)
+		err := multiClusterServer.Add(config)
 		if err != nil {
 			setupLog.Error(err, "unable to add a config to server")
 			os.Exit(1)
@@ -83,17 +84,17 @@ func main() {
 	}
 
 	podReconciler := PodReconciler{
-		Client: multiControllerServer.GetClient(),
-		Log:    multiControllerServer.GetLogger(),
-		Scheme: multiControllerServer.GetSchema(),
+		Client: multiClusterServer.GetClient(),
+		Log:    multiClusterServer.GetLogger(),
+		Scheme: multiClusterServer.GetSchema(),
 	}
 
 	// add reconciler setup function
-	multiControllerServer.AddReconcilerSetup(podReconciler.SetupWithManager)
+	multiClusterServer.AddReconcilerSetup(podReconciler.SetupWithManager)
 
 	setupLog.Info("starting server")
 	// start server - it'll start controller based on registered clusters
-	if err := multiControllerServer.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := multiClusterServer.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running server")
 		os.Exit(1)
 	}

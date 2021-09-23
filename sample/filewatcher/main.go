@@ -38,11 +38,15 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+	var configPath string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.StringVar(&configPath, "config-path", ".",
+		"The path to a directory that contains multiple kubeconfig files or a single kubeconfig.")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -53,7 +57,7 @@ func main() {
 
 	// filewatcher will watch a filepath and delivery kubeconfig events from it.
 	// filepath can be a single kubeconfig file or a directory that contains many kubeconfigs.
-	filewatcher, err := configwatcher.NewFileWatcher("/Users/hu/.kube/kubeconfig")
+	filewatcher, err := configwatcher.NewFileWatcher(configPath)
 	if err != nil {
 		setupLog.Error(err, "new file watcher failed")
 		return
@@ -61,7 +65,7 @@ func main() {
 
 	// create multi cluster controller server just like controller-runtime Manager
 	// server use config to do leaderElection and use options to builder controller-runtime Manager inside
-	multiControllerServer, err := server.NewServer(ctrl.GetConfigOrDie(), ctrl.Options{
+	multiClusterServer, err := server.NewServer(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
 		Port:                   9443,
@@ -75,22 +79,22 @@ func main() {
 	}
 
 	podReconciler := PodReconciler{
-		Client: multiControllerServer.GetClient(),
-		Log:    multiControllerServer.GetLogger(),
-		Scheme: multiControllerServer.GetSchema(),
+		Client: multiClusterServer.GetClient(),
+		Log:    multiClusterServer.GetLogger(),
+		Scheme: multiClusterServer.GetSchema(),
 	}
 
 	// add reconciler setup function
-	multiControllerServer.AddReconcilerSetup(podReconciler.SetupWithManager)
+	multiClusterServer.AddReconcilerSetup(podReconciler.SetupWithManager)
 
 	serviceReconciler := ServiceReconciler{
-		Client: multiControllerServer.GetClient(),
-		Log:    multiControllerServer.GetLogger(),
-		Scheme: multiControllerServer.GetSchema(),
+		Client: multiClusterServer.GetClient(),
+		Log:    multiClusterServer.GetLogger(),
+		Scheme: multiClusterServer.GetSchema(),
 	}
 
 	// add reconciler setup function
-	multiControllerServer.AddReconcilerSetup(serviceReconciler.SetupWithManager)
+	multiClusterServer.AddReconcilerSetup(serviceReconciler.SetupWithManager)
 
 	go func() {
 		// close filewatcher and release resources
@@ -101,11 +105,11 @@ func main() {
 			case event := <-filewatcher.Events():
 				if event.Type == configwatcher.Added {
 					// add the config to server and start a controller to list&watch the k8s cluster if server started
-					multiControllerServer.Add(event.Config)
+					multiClusterServer.Add(event.Config)
 				}
 				if event.Type == configwatcher.Deleted {
 					// delete the config to server and stop to list&watch the k8s cluster if controller exist
-					multiControllerServer.Delete(event.Config.Name)
+					multiClusterServer.Delete(event.Config.Name)
 				}
 			case err := <-filewatcher.Errors():
 				setupLog.Error(err, "receive error from filewatcher")
@@ -115,7 +119,7 @@ func main() {
 
 	setupLog.Info("starting server")
 	// start server - it'll start controller based on registered clusters
-	if err := multiControllerServer.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := multiClusterServer.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running server")
 		os.Exit(1)
 	}

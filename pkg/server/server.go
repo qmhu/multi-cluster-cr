@@ -57,9 +57,12 @@ type Server interface {
 	GetLogger() logr.Logger
 }
 
-type controllerServer struct {
+type clusterServer struct {
 	// setupFns is the set of reconciler setup functions that server execution with manager and starts.
 	setupFns []func(mgr ctrl.Manager) error
+
+	// internalManager is the internal controller-runtime manager for basic functions, like leader election.
+	internalManager ctrl.Manager
 
 	// managerRunners is the map of managerRunner that hold all managed controller-runtime managers.
 	managerRunners map[string]*managerRunner
@@ -85,33 +88,39 @@ type controllerServer struct {
 
 	logger logr.Logger
 
-	internalCtx context.Context
+	internalCtx    context.Context
+	internalCancel context.CancelFunc
 }
 
 func NewServer(config *rest.Config, options ctrl.Options) (Server, error) {
+	internalManager, err := ctrl.NewManager(config, options)
+	if err != nil {
+		return nil, err
+	}
+
 	logger := log.Log.WithName("multi-cluster-server")
 	if options.Logger != nil {
 		logger = options.Logger
 	}
-	client := mtclient.NewMultiClusterClient()
-	server := &controllerServer{
-		setupFns:             make([]func(mgr ctrl.Manager) error, 0),
-		managerRunners:       make(map[string]*managerRunner),
-		client:               client,
-		leaderElectionConfig: config,
-		options:              options,
-		logger:               logger,
+
+	server := &clusterServer{
+		setupFns:        make([]func(mgr ctrl.Manager) error, 0),
+		managerRunners:  make(map[string]*managerRunner),
+		client:          mtclient.NewMultiClusterClient(),
+		options:         options,
+		logger:          logger,
+		internalManager: internalManager,
 	}
 	return server, nil
 }
 
-func (s *controllerServer) AddReconcilerSetup(fn func(mgr ctrl.Manager) error) {
+func (s *clusterServer) AddReconcilerSetup(fn func(mgr ctrl.Manager) error) {
 	if fn != nil {
 		s.setupFns = append(s.setupFns, fn)
 	}
 }
 
-func (s *controllerServer) Add(add *config.NamedConfig) error {
+func (s *clusterServer) Add(add *config.NamedConfig) error {
 	if len(strings.TrimSpace(add.Name)) == 0 || add.Config == nil {
 		return fmt.Errorf("name or config is empty")
 	}
@@ -140,6 +149,8 @@ func (s *controllerServer) Add(add *config.NamedConfig) error {
 	if s.isStart {
 		err := s.setupManager(runner.manager)
 		if err != nil {
+			// remove it if failed to setup
+			delete(s.managerRunners, add.Name)
 			return err
 		}
 
@@ -149,7 +160,7 @@ func (s *controllerServer) Add(add *config.NamedConfig) error {
 	return nil
 }
 
-func (s *controllerServer) Delete(del string) error {
+func (s *clusterServer) Delete(del string) error {
 	if len(strings.TrimSpace(del)) == 0 {
 		return fmt.Errorf("cannot delete cluster with empty name")
 	}
@@ -173,15 +184,46 @@ func (s *controllerServer) Delete(del string) error {
 	return fmt.Errorf("cannot delete non existent cluster %s", del)
 }
 
-func (s *controllerServer) Start(ctx context.Context) error {
-	s.internalCtx = ctx
+func (s *clusterServer) Start(ctx context.Context) error {
+	defer func() {
+		// cancel all manager if error occurs
+		s.internalCancel()
+		// wait all managers to stop and complete
+		s.runnableManagers.Wait()
+	}()
 
+	s.mu.Lock()
+	if s.isStart {
+		return fmt.Errorf("server already started, please don't start it twice! ")
+	}
+
+	s.internalCtx, s.internalCancel = context.WithCancel(ctx)
 	s.errChan = make(chan error)
+	s.mu.Unlock()
 
 	func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
+		// run internalManager here
+		s.runnableManagers.Add(1)
+		go func() {
+			defer s.runnableManagers.Done()
+
+			if err := s.internalManager.Start(s.internalCtx); err != nil {
+				s.errChan <- err
+			}
+		}()
+
+		// wait internalManager to finish leader election
+		select {
+		case <-s.internalManager.Elected():
+			break
+		case <-ctx.Done():
+			return
+		}
+
+		// setup and start
 		for _, runner := range s.managerRunners {
 			runner := runner
 			err := s.setupManager(runner.manager)
@@ -204,22 +246,21 @@ func (s *controllerServer) Start(ctx context.Context) error {
 		// Error starting or running a manager
 		return err
 	}
-	return nil
 }
 
-func (s *controllerServer) GetClient() client.Client {
+func (s *clusterServer) GetClient() client.Client {
 	return s.client
 }
 
-func (s *controllerServer) GetSchema() *runtime.Scheme {
+func (s *clusterServer) GetSchema() *runtime.Scheme {
 	return s.scheme
 }
 
-func (s *controllerServer) GetLogger() logr.Logger {
+func (s *clusterServer) GetLogger() logr.Logger {
 	return s.logger
 }
 
-func (s *controllerServer) addConfig(config *config.NamedConfig) error {
+func (s *clusterServer) addConfig(config *config.NamedConfig) error {
 	// create controller-runtime manager
 	mgr, err := ctrl.NewManager(config.Config, s.getManagerOptions())
 	if err != nil {
@@ -247,7 +288,7 @@ func (s *controllerServer) addConfig(config *config.NamedConfig) error {
 	return nil
 }
 
-func (s *controllerServer) runManager(runner *managerRunner) {
+func (s *clusterServer) runManager(runner *managerRunner) {
 	s.logger.Info("Starting manager", "cluster", runner.config.Name)
 	s.runnableManagers.Add(1)
 
@@ -256,12 +297,10 @@ func (s *controllerServer) runManager(runner *managerRunner) {
 		if err := runner.Start(s.internalCtx); err != nil {
 			s.errChan <- err
 		}
-
-		runner.Done()
 	}()
 }
 
-func (s *controllerServer) setupManager(mgr ctrl.Manager) error {
+func (s *clusterServer) setupManager(mgr ctrl.Manager) error {
 	for _, fn := range s.setupFns {
 		err := fn(mgr)
 		if err != nil {
@@ -272,7 +311,7 @@ func (s *controllerServer) setupManager(mgr ctrl.Manager) error {
 	return nil
 }
 
-func (s *controllerServer) getManagerOptions() ctrl.Options {
+func (s *clusterServer) getManagerOptions() ctrl.Options {
 	options := s.options
 	options.MetricsBindAddress = "0"
 	options.HealthProbeBindAddress = "0"
