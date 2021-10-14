@@ -39,37 +39,29 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
-	var configPath string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
+	flag.BoolVar(&enableLeaderElection, "leader-elect", true,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flag.StringVar(&configPath, "config-path", "",
-		"The path to a directory that contains multiple kubeconfig files or a single kubeconfig.")
-
 	opts := zap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	if len(configPath) == 0 {
-		setupLog.Error(nil, "please provide config-path by --config-path")
-		os.Exit(1)
-	}
-
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	// create multi cluster controller server just like controller-runtime Manager
 	// server use config to do leaderElection and use options to builder controller-runtime Manager inside
 	multiClusterServer, err := server.NewServer(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "80807133.tutorial.kubebuilder.io",
+		Scheme:                  scheme,
+		MetricsBindAddress:      metricsAddr,
+		Port:                    9443,
+		HealthProbeBindAddress:  probeAddr,
+		LeaderElection:          enableLeaderElection,
+		LeaderElectionID:        "80807133.tutorial.kubebuilder.io",
+		LeaderElectionNamespace: "default",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to new server")
@@ -85,30 +77,20 @@ func main() {
 	// add reconciler setup function
 	multiClusterServer.AddReconcilerSetup(podReconciler.SetupWithManager)
 
-	serviceReconciler := ServiceReconciler{
-		Client: multiClusterServer.GetClient(),
-		Log:    multiClusterServer.GetLogger(),
-		Scheme: multiClusterServer.GetScheme(),
-	}
-
-	// add reconciler setup function
-	multiClusterServer.AddReconcilerSetup(serviceReconciler.SetupWithManager)
-
-	// filewatcher watch a filepath and delivery kubeconfig events from it.
-	// filepath can be a single kubeconfig file or a directory that contains many kubeconfigs.
-	filewatcher, err := configwatcher.NewFileWatcher(configPath)
+	// kubefedWatcher watch KubeFedCluster in hub cluster and delivery kubeconfig events from it.
+	kubefedWatcher, err := configwatcher.NewKubeFedWatcher(ctrl.GetConfigOrDie())
 	if err != nil {
-		setupLog.Error(err, "new file watcher failed")
-		os.Exit(1)
+		setupLog.Error(err, "new kubefed watcher failed")
+		return
 	}
 
 	go func() {
-		// close filewatcher and release resources
-		defer filewatcher.Stop()
+		// close kubefedWatcher and release resources
+		defer kubefedWatcher.Stop()
 
 		for {
 			select {
-			case event := <-filewatcher.Events():
+			case event := <-kubefedWatcher.Events():
 				if event.Type == configwatcher.Added {
 					// add the config to server and start a controller to list&watch the k8s cluster if server started
 					err := multiClusterServer.Add(event.Config)
@@ -130,8 +112,8 @@ func main() {
 						setupLog.Error(err, "delete config failed", "name", event.Config.Name)
 					}
 				}
-			case err := <-filewatcher.Errors():
-				setupLog.Error(err, "receive error from filewatcher")
+			case err := <-kubefedWatcher.Errors():
+				setupLog.Error(err, "receive error from kubefedWatcher")
 			}
 		}
 	}()
@@ -167,31 +149,5 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1.Pod{}).
-		Complete(r)
-}
-
-// ServiceReconciler reconciles a Service object
-type ServiceReconciler struct {
-	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
-}
-
-func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	setupLog.Info("got", "cluster", ctx.Value(known.ClusterContext), "service", req.NamespacedName)
-
-	// The client use context to decide which cluster to interactive with,
-	// You can use the client directly just like single cluster client.
-	var service v1.Service
-	r.Client.Get(ctx, req.NamespacedName, &service)
-
-	// your logic here
-
-	return ctrl.Result{}, nil
-}
-
-func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1.Service{}).
 		Complete(r)
 }

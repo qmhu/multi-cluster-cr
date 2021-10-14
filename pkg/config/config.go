@@ -8,7 +8,10 @@ import (
 )
 
 type NamedConfig struct {
+	// Name indicate the cluster name
 	Name string
+
+	// connection config object to a k8s cluster
 	*rest.Config
 }
 

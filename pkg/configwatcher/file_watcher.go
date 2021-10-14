@@ -2,6 +2,7 @@ package configwatcher
 
 import (
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +20,7 @@ type FileWatcher struct {
 	eventChan chan Event
 	errorChan chan error
 	closeChan chan struct{}
-	configMap map[string][]*config.NamedConfig
+	configMap map[string]*config.NamedConfig
 	mu        sync.Mutex
 }
 
@@ -37,7 +38,7 @@ func NewFileWatcher(fileOrDir string) (*FileWatcher, error) {
 		eventChan: make(chan Event),
 		errorChan: make(chan error),
 		closeChan: make(chan struct{}),
-		configMap: make(map[string][]*config.NamedConfig), // full-filename->kubeconfig list
+		configMap: make(map[string]*config.NamedConfig), // filename+configname->kubeconfig
 	}
 
 	go fileWatcher.watch(fileOrDir)
@@ -121,8 +122,8 @@ func (w *FileWatcher) watch(fileOrDir string) {
 	}
 }
 
-func (w *FileWatcher) onFileUpdate(name string) {
-	configs, err := config.LoadConfigsFromConfigFile(name)
+func (w *FileWatcher) onFileUpdate(filename string) {
+	configs, err := config.LoadConfigsFromConfigFile(filename)
 	if err != nil {
 		w.errorChan <- err
 		return
@@ -135,64 +136,49 @@ func (w *FileWatcher) onFileUpdate(name string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if savedConfigs, exist := w.configMap[name]; exist {
-		for _, savedConfig := range savedConfigs {
-			configDeleted := true
-			for _, config := range configs {
-				if reflect.DeepEqual(config, savedConfig) {
-					configDeleted = false
-					break
-				}
-			}
-
-			if configDeleted {
+	for _, config := range configs {
+		if savedConfig, exist := w.configMap[buildKey(filename, config.Name)]; exist {
+			if reflect.DeepEqual(savedConfig, config) {
+				continue
+			} else {
 				w.eventChan <- Event{
-					Type:   Deleted,
-					Config: savedConfig,
-				}
-			}
-		}
-
-		for _, config := range configs {
-			configAdded := true
-			for _, savedConfig := range savedConfigs {
-				if reflect.DeepEqual(config, savedConfig) {
-					configAdded = false
-					break
-				}
-			}
-
-			if configAdded {
-				w.eventChan <- Event{
-					Type:   Added,
+					Type:   Updated,
 					Config: config,
 				}
 			}
-		}
-	} else {
-		for _, config := range configs {
+		} else {
 			w.eventChan <- Event{
 				Type:   Added,
 				Config: config,
 			}
 		}
-	}
 
-	w.configMap[name] = configs
+		w.configMap[buildKey(filename, config.Name)] = config
+	}
 }
 
-func (w *FileWatcher) onFileDelete(name string) {
+func (w *FileWatcher) onFileDelete(filename string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if savedConfigs, exist := w.configMap[name]; exist {
-		for _, savedConfig := range savedConfigs {
+	for key, config := range w.configMap {
+		if strings.HasPrefix(key, buildKeyPrefix(filename)) {
 			w.eventChan <- Event{
 				Type:   Deleted,
-				Config: savedConfig,
+				Config: config,
 			}
 		}
-	}
 
-	delete(w.configMap, name)
+		delete(w.configMap, buildKey(filename, config.Name))
+	}
+}
+
+// buildKey return a unique key string for store a Config in configMap
+func buildKey(filename string, name string) string {
+	return buildKeyPrefix(filename) + name
+}
+
+// buildKeyPrefix return a unique key prefix string
+func buildKeyPrefix(filename string) string {
+	return filename + "|"
 }
