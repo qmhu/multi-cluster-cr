@@ -8,6 +8,7 @@ type EventType string
 
 const (
 	Added    EventType = "ADDED"
+	Updated  EventType = "UPDATED"
 	Deleted  EventType = "DELETED"
 )
 
@@ -16,7 +17,7 @@ type Event struct {
 	// Type defines the possible types of events.
 	Type EventType
 
-	// When Type is Added or Modified, the Config is the new state of the kubeconfig
+	// When Type is Added or Updated, the Config is the new state of the kubeconfig
 	// When Type is Deleted, the Config is the latest version kubeconfig before deletion
 	Config *config.NamedConfig
 }

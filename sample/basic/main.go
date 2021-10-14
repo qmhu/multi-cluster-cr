@@ -39,11 +39,14 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+	var configPath string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.StringVar(&configPath, "config-path", "",
+		"The path to a directory that contains multiple kubeconfig files or a single kubeconfig.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -52,11 +55,16 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	if len(configPath) == 0 {
+		setupLog.Error(nil, "please provide config-path by --config-path")
+		os.Exit(1)
+	}
+
 	// load all kubeconfigs with cluster name from a kubeconfig
-	configs, err := config.LoadConfigsFromConfigFile("/Users/hu/.kube/config")
+	configs, err := config.LoadConfigsFromConfigFile(configPath)
 	if err != nil {
 		setupLog.Error(err, "failed to load configs from file.")
-		return
+		os.Exit(1)
 	}
 
 	// create multi cluster controller server just like controller-runtime Manager
@@ -86,7 +94,7 @@ func main() {
 	podReconciler := PodReconciler{
 		Client: multiClusterServer.GetClient(),
 		Log:    multiClusterServer.GetLogger(),
-		Scheme: multiClusterServer.GetSchema(),
+		Scheme: multiClusterServer.GetScheme(),
 	}
 
 	// add reconciler setup function

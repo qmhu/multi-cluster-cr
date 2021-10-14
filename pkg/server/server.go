@@ -18,16 +18,24 @@ import (
 	"qmhu/multi-cluster-cr/pkg/config"
 )
 
+var (
+	ClusterNotExistErr = fmt.Errorf("cannot delete non existent cluster")
+)
+
 // Server management controllers cross multiple clusters.
 type Server interface {
-
 	// AddReconcilerSetup allows you to add reconciler setup functions
 	AddReconcilerSetup(fn func(mgr ctrl.Manager) error)
 
 	// Add allows you to register a cluster for server,
 	// server create a controller-runtime manager based on kubeconfig in NamedConfig,
-	// save the manager,setup with reconciler and run it when server start up.
+	// save the manager, setup with reconciler and run it when server start up.
 	Add(add *config.NamedConfig) error
+
+	// Update allows you to update a cluster config for server,
+	// it will execute Delete first to shut down controllers for the cluster
+	// then execute Add to start controllers
+	Update(update *config.NamedConfig) error
 
 	// Delete allows you to unregister a cluster for server,
 	// it will stop and delete controller-runtime manager which matches name,
@@ -49,9 +57,9 @@ type Server interface {
 	//}
 	GetClient() client.Client
 
-	// GetSchema returns the first registered cluster's Schema.
+	// GetScheme returns the first registered cluster's Scheme.
 	// Scheme should be symmetric for clusters when use multi-cluster cr.
-	GetSchema() *runtime.Scheme
+	GetScheme() *runtime.Scheme
 
 	// GetLogger returns this server's logger.
 	GetLogger() logr.Logger
@@ -78,7 +86,7 @@ type clusterServer struct {
 	// leaderElectionConfig is the kubeconfig to do leaderElection
 	leaderElectionConfig *rest.Config
 
-	// scheme is the first registered cluster's Schema.
+	// scheme is the first registered cluster's Scheme.
 	scheme *runtime.Scheme
 
 	runnableManagers sync.WaitGroup
@@ -160,6 +168,20 @@ func (s *clusterServer) Add(add *config.NamedConfig) error {
 	return nil
 }
 
+func (s *clusterServer) Update(update *config.NamedConfig) error {
+	err := s.Delete(update.Name)
+	if err != nil && err != ClusterNotExistErr {
+		return fmt.Errorf("update cluster failed: %v ", err)
+	}
+
+	err = s.Add(update)
+	if err != nil {
+		return fmt.Errorf("update cluster failed: %v ", err)
+	}
+
+	return nil
+}
+
 func (s *clusterServer) Delete(del string) error {
 	if len(strings.TrimSpace(del)) == 0 {
 		return fmt.Errorf("cannot delete cluster with empty name")
@@ -181,7 +203,7 @@ func (s *clusterServer) Delete(del string) error {
 		return nil
 	}
 
-	return fmt.Errorf("cannot delete non existent cluster %s", del)
+	return ClusterNotExistErr
 }
 
 func (s *clusterServer) Start(ctx context.Context) error {
@@ -252,7 +274,7 @@ func (s *clusterServer) GetClient() client.Client {
 	return s.client
 }
 
-func (s *clusterServer) GetSchema() *runtime.Scheme {
+func (s *clusterServer) GetScheme() *runtime.Scheme {
 	return s.scheme
 }
 
